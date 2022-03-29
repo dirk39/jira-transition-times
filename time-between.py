@@ -11,8 +11,8 @@ from datetime import timedelta
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 JIRA_INSTALLATION = "jira.installation.com"
-FIRST_STATE = "In Progress"
-FINAL_STATE = "Done"
+FIRST_STATE = "IMPLEMENTATION"
+FINAL_STATE = "DONE"
 
 
 def main(argv):
@@ -59,9 +59,6 @@ def get_transition_times(
     while True:
         print("Getting tickets from JIRA... (%s)" % str(start_at + max_results))
         print("startAt: %s\nmaxResults: %s" % (str(start_at), str(max_results)))
-        print(
-            f"https://{url}/rest/api/2/search?jql=filter={filter}&fields=key&startAt={start_at}&maxResults={max_results}"
-        )
         all_issues = requests.get(
             url=f"https://{url}/rest/api/2/search?jql=filter={filter}&fields=key&startAt={start_at}&maxResults={max_results}",
             headers=headers,
@@ -82,45 +79,66 @@ def get_transition_times(
             break
 
         for issue in issues:
+            # if issue["key"] != "DELI-2074":
+            #     continue
+
             issue_content = requests.get(
                 url=issue["self"] + "?expand=changelog&fields=changelog",
                 headers=headers,
                 verify=False,
             )
+
             changelog = json.loads(issue_content.content)["changelog"]
+            # print(issue_content.content)
             histories = changelog["histories"]
 
-            start_time = datetime.now() - timedelta(
-                days=365 * 1000
-            )  # :-) , sometime back in time
-            end_time = datetime.now() - timedelta(days=365 * 1000)
+            start_time = None
+            end_time = None
+            # start_time = datetime.utcnow() - timedelta(
+            #     days=365 * 1000
+            # )  # :-) , sometime back in time
+            # end_time = datetime.utcnow() - timedelta(days=365 * 1000)
             quick_transition = True
 
             for history in histories:
-                item = history["items"][0]
-                created = history["created"]
-                if item["field"] == "status":
+                # print("HISTORY ----",history)
+                for item in history["items"]:
+                    if item["field"] != "status":
+                        continue
+                    # print(item)
+                    # item = history["items"][0]
+                    created = history["created"]
+                    # if item["field"] == "status":
                     if item["toString"] == first_state:
                         timeTransitioned = datetime.strptime(
-                            (history["created"])[:-9], "%Y-%m-%dT%H:%M:%S"
-                        )  # -9 to trim UTC/mms
+                            (history["created"]), "%Y-%m-%dT%H:%M:%S.%f%z"
+                        )
                         quick_transition = False
-                        if timeTransitioned > start_time:
+                        if start_time is None or timeTransitioned > start_time:
                             start_time = timeTransitioned
                     elif item["toString"] == final_state:
                         timeTransitioned = datetime.strptime(
-                            (history["created"])[:-9], "%Y-%m-%dT%H:%M:%S"
-                        )  # -9 to trim UTC/mms
-                        if timeTransitioned > end_time:
+                            (history["created"]), "%Y-%m-%dT%H:%M:%S.%f%z"
+                        )
+                        if end_time is None or timeTransitioned > end_time:
                             end_time = timeTransitioned
-                    if quick_transition:
-                        start_time = end_time
-
+            if quick_transition:
+                start_time = end_time
+            if start_time is None or end_time is None:
+                # print("No start or end time found for issue: ", issue["key"])
+                print(
+                    str(issue["key"])
+                    + ";0"
+                    # + str(issue["self"])
+                    # + ";"
+                )
+                continue
+            # print("Times: ", start_time, end_time)
             print(
                 str(issue["key"])
                 + ";"
-                + str(issue["self"])
-                + ";"
+                # + str(issue["self"])
+                # + ";"
                 + str(end_time - start_time)
             )
         start_at += max_results
