@@ -1,3 +1,4 @@
+import csv
 import requests
 import json
 import base64
@@ -13,6 +14,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 JIRA_INSTALLATION = "jira.installation.com"
 FIRST_STATE = "IMPLEMENTATION"
 FINAL_STATE = "DONE"
+
+
+def write_on_file(content):
+    with open("output.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Ticket", "start", "end", "diff"])
+        writer.writerows(content)
 
 
 def main(argv):
@@ -40,9 +48,10 @@ def main(argv):
     if len(argv) < 4:
         print("Use with -u <username> -p <password> <JIRA-filter-id>.")
         sys.exit(2)
-    get_transition_times(
+    transition_times = get_transition_times(
         args.username, args.password, args.jira_installation, args.filter_id
     )
+    write_on_file(transition_times)
 
 
 def get_transition_times(
@@ -53,6 +62,7 @@ def get_transition_times(
         "Authorization": "Basic %s" % str(base64.b64encode(encoded), "utf-8"),
         "Content-Type": "application/json",
     }
+    results = []
 
     start_at = 0
     max_results = 50
@@ -79,9 +89,6 @@ def get_transition_times(
             break
 
         for issue in issues:
-            # if issue["key"] != "DELI-2074":
-            #     continue
-
             issue_content = requests.get(
                 url=issue["self"] + "?expand=changelog&fields=changelog",
                 headers=headers,
@@ -89,26 +96,17 @@ def get_transition_times(
             )
 
             changelog = json.loads(issue_content.content)["changelog"]
-            # print(issue_content.content)
             histories = changelog["histories"]
 
             start_time = None
             end_time = None
-            # start_time = datetime.utcnow() - timedelta(
-            #     days=365 * 1000
-            # )  # :-) , sometime back in time
-            # end_time = datetime.utcnow() - timedelta(days=365 * 1000)
+            diff_time = None
             quick_transition = True
 
             for history in histories:
-                # print("HISTORY ----",history)
                 for item in history["items"]:
                     if item["field"] != "status":
                         continue
-                    # print(item)
-                    # item = history["items"][0]
-                    created = history["created"]
-                    # if item["field"] == "status":
                     if item["toString"] == first_state:
                         timeTransitioned = datetime.strptime(
                             (history["created"]), "%Y-%m-%dT%H:%M:%S.%f%z"
@@ -124,24 +122,11 @@ def get_transition_times(
                             end_time = timeTransitioned
             if quick_transition:
                 start_time = end_time
-            if start_time is None or end_time is None:
-                # print("No start or end time found for issue: ", issue["key"])
-                print(
-                    str(issue["key"])
-                    + ";0"
-                    # + str(issue["self"])
-                    # + ";"
-                )
-                continue
-            # print("Times: ", start_time, end_time)
-            print(
-                str(issue["key"])
-                + ";"
-                # + str(issue["self"])
-                # + ";"
-                + str(end_time - start_time)
-            )
+            diff_time = end_time - start_time if end_time is not None and start_time is not None else None
+            print(str(issue["key"]) + ";" + str(diff_time))
+            results.append([issue["key"], start_time, end_time, diff_time])
         start_at += max_results
+    return results
 
 
 if __name__ == "__main__":
